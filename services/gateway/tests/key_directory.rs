@@ -3,9 +3,9 @@ use axum::{
     http::{Method, Request, StatusCode, header::CONTENT_TYPE},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use messenger_crypto_core::AccountIdentity;
+use messenger_crypto_core::{AccountIdentity, DeviceIdentity};
 use messenger_gateway::{
-    KeyPackageClaimRequest, KeyPackageResponse, KeyPackageUploadRequest,
+    DeviceRegistrationRequest, KeyPackageClaimRequest, KeyPackageResponse, KeyPackageUploadRequest,
     RegistrationChallengeResponse, RegistrationRequest, app,
 };
 use messenger_mls_session::MlsClient;
@@ -68,17 +68,36 @@ async fn register_identity(router: &axum::Router, identity: &AccountIdentity) {
     assert_eq!(response.status(), StatusCode::CREATED);
 }
 
+async fn register_device(
+    router: &axum::Router,
+    account: &AccountIdentity,
+    device: &DeviceIdentity,
+) {
+    let response = post_json(
+        router,
+        "/v1/devices",
+        &DeviceRegistrationRequest {
+            certificate: account.authorize_device(device),
+        },
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+}
+
 #[tokio::test]
 async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
     let router = app();
     let bob_identity = AccountIdentity::generate().expect("bob identity");
     let bob_contact = bob_identity.contact_card();
-    let bob_mls = MlsClient::generate().expect("bob MLS client");
+    let bob_device = DeviceIdentity::generate().expect("bob device");
+    let bob_certificate = bob_identity.authorize_device(&bob_device);
+    let bob_mls = MlsClient::generate_for_device(bob_device.device_id()).expect("bob MLS client");
     register_identity(&router, &bob_identity).await;
+    register_device(&router, &bob_identity, &bob_device).await;
 
     let bob_key_package = bob_mls.key_package().expect("bob KeyPackage");
     let binding = bob_identity
-        .bind_key_package(&bob_mls.device_id(), &bob_key_package)
+        .bind_key_package(&bob_device.device_id(), &bob_key_package)
         .expect("root-signed KeyPackage");
 
     let upload = post_json(
@@ -109,10 +128,23 @@ async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
         .decode(&claimed.key_package)
         .expect("claimed KeyPackage base64url");
     assert_eq!(claimed_bytes, bob_key_package);
+    assert_eq!(claimed.device_certificate, bob_certificate);
+    claimed
+        .device_certificate
+        .verify()
+        .expect("root-signed device certificate");
+    assert_eq!(claimed.device_certificate.account_id, bob_contact.account_id);
+    assert_eq!(
+        claimed.device_certificate.root_public_key,
+        bob_contact.root_public_key
+    );
+    assert_eq!(claimed.binding.device_id, claimed.device_certificate.device_id);
     claimed
         .binding
         .verify_for_contact(&bob_contact, &claimed_bytes)
         .expect("KeyPackage belongs to QR-authenticated Bob");
+    MlsClient::validate_key_package_for_device(&claimed_bytes, &bob_device.device_id())
+        .expect("KeyPackage BasicCredential matches Bob device certificate");
 
     let alice_mls = MlsClient::generate().expect("alice MLS client");
     let mut alice_group = alice_mls.create_group().expect("alice group");
@@ -136,11 +168,11 @@ async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
         .enqueue(Envelope {
             version: ENVELOPE_VERSION,
             envelope_id: Uuid::new_v4(),
-            mailbox_id: "bob-device-mailbox".to_owned(),
+            mailbox_id: claimed.device_certificate.mailbox_id.clone(),
             ciphertext: ciphertext.clone(),
         })
         .expect("relay enqueue");
-    let delivered = relay.drain_mailbox("bob-device-mailbox");
+    let delivered = relay.retrieve_mailbox(&claimed.device_certificate.mailbox_id);
     assert_eq!(delivered.len(), 1);
     assert_eq!(delivered[0].ciphertext, ciphertext);
 
@@ -164,12 +196,14 @@ async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
 async fn directory_rejects_key_package_modified_after_root_signature() {
     let router = app();
     let identity = AccountIdentity::generate().expect("identity");
-    let mls = MlsClient::generate().expect("MLS client");
+    let device = DeviceIdentity::generate().expect("device");
+    let mls = MlsClient::generate_for_device(device.device_id()).expect("MLS client");
     register_identity(&router, &identity).await;
+    register_device(&router, &identity, &device).await;
 
     let original = mls.key_package().expect("KeyPackage");
     let binding = identity
-        .bind_key_package(&mls.device_id(), &original)
+        .bind_key_package(&device.device_id(), &original)
         .expect("binding");
     let mut tampered = original;
     let index = tampered.len() / 2;
