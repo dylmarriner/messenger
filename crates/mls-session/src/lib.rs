@@ -18,6 +18,7 @@ const CIPHERSUITE: Ciphersuite =
 /// This type deliberately does not implement `Debug`, `Clone`, or serialization.
 /// The provider and signer contain cryptographic state that must stay client-side.
 pub struct MlsClient {
+    device_id: [u8; DEVICE_CREDENTIAL_ID_BYTES],
     provider: OpenMlsRustCrypto,
     signer: SignatureKeyPair,
     credential: CredentialWithKey,
@@ -73,8 +74,8 @@ impl MlsClient {
     pub fn generate() -> Result<Self, MlsError> {
         let provider = OpenMlsRustCrypto::default();
 
-        let mut device_credential_id = [0_u8; DEVICE_CREDENTIAL_ID_BYTES];
-        getrandom::fill(&mut device_credential_id).map_err(|_| MlsError::EntropyUnavailable)?;
+        let mut device_id = [0_u8; DEVICE_CREDENTIAL_ID_BYTES];
+        getrandom::fill(&mut device_id).map_err(|_| MlsError::EntropyUnavailable)?;
 
         let signer = SignatureKeyPair::new(CIPHERSUITE.signature_algorithm())
             .map_err(|_| MlsError::CredentialKeyGeneration)?;
@@ -82,17 +83,22 @@ impl MlsClient {
             .store(provider.storage())
             .map_err(|_| MlsError::CredentialKeyStorage)?;
 
-        let basic_credential = BasicCredential::new(device_credential_id.to_vec());
+        let basic_credential = BasicCredential::new(device_id.to_vec());
         let credential = CredentialWithKey {
             credential: basic_credential.into(),
             signature_key: signer.to_public_vec().into(),
         };
 
         Ok(Self {
+            device_id,
             provider,
             signer,
             credential,
         })
+    }
+
+    pub fn device_id(&self) -> [u8; DEVICE_CREDENTIAL_ID_BYTES] {
+        self.device_id
     }
 
     /// Creates a fresh, one-time MLS KeyPackage and returns only its public bytes.
