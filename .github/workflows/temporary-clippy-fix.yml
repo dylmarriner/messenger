@@ -1,0 +1,49 @@
+name: Temporary Clippy Fix
+
+on:
+  push:
+    branches: ["scaffold/phase-1-vertical-slice"]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: scaffold/phase-1-vertical-slice
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Apply exact auto-deref fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/crypto-core/src/lib.rs")
+          source = path.read_text()
+          replacements = {
+              "SigningKey::from_bytes(&*root_secret)": "SigningKey::from_bytes(&root_secret)",
+              "SigningKey::from_bytes(&*auth_secret)": "SigningKey::from_bytes(&auth_secret)",
+          }
+          for old, new in replacements.items():
+              if source.count(old) != 1:
+                  raise SystemExit(f"expected exactly one occurrence of {old!r}")
+              source = source.replace(old, new)
+          path.write_text(source)
+          PY
+          cargo fmt --all
+      - name: Commit exact fixes
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/crypto-core/src/lib.rs
+          git commit -m "fix(crypto): satisfy strict auto-deref lint"
+          git push origin HEAD:scaffold/phase-1-vertical-slice
