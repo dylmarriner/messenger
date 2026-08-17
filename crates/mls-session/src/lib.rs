@@ -72,11 +72,15 @@ pub enum MlsError {
 
 impl MlsClient {
     pub fn generate() -> Result<Self, MlsError> {
-        let provider = OpenMlsRustCrypto::default();
-
         let mut device_id = [0_u8; DEVICE_CREDENTIAL_ID_BYTES];
         getrandom::fill(&mut device_id).map_err(|_| MlsError::EntropyUnavailable)?;
+        Self::generate_for_device(device_id)
+    }
 
+    pub fn generate_for_device(
+        device_id: [u8; DEVICE_CREDENTIAL_ID_BYTES],
+    ) -> Result<Self, MlsError> {
+        let provider = OpenMlsRustCrypto::default();
         let signer = SignatureKeyPair::new(CIPHERSUITE.signature_algorithm())
             .map_err(|_| MlsError::CredentialKeyGeneration)?;
         signer
