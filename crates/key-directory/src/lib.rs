@@ -70,13 +70,17 @@ impl InMemoryKeyDirectory {
 
     pub fn claim(&self, account_id: &str) -> Result<PublishedKeyPackage, KeyDirectoryError> {
         let mut state = self.state();
-        let Some(queue) = state.packages.get_mut(account_id) else {
-            return Err(KeyDirectoryError::NoKeyPackage);
+        let (package, remove_queue) = {
+            let Some(queue) = state.packages.get_mut(account_id) else {
+                return Err(KeyDirectoryError::NoKeyPackage);
+            };
+            let Some(package) = queue.pop_front() else {
+                return Err(KeyDirectoryError::NoKeyPackage);
+            };
+            (package, queue.is_empty())
         };
-        let Some(package) = queue.pop_front() else {
-            return Err(KeyDirectoryError::NoKeyPackage);
-        };
-        if queue.is_empty() {
+
+        if remove_queue {
             state.packages.remove(account_id);
         }
         Ok(package)
