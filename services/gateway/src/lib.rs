@@ -10,14 +10,19 @@ use axum::{
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use messenger_crypto_core::RegistrationProof;
+use messenger_crypto_core::{KeyPackageBinding, RegistrationProof};
+use messenger_key_directory::{InMemoryKeyDirectory, KeyDirectoryError, PublishedKeyPackage};
 use messenger_registration::{InMemoryRegistrationService, RegistrationError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+const MAX_KEY_PACKAGE_BYTES: usize = 64 * 1024;
+const MAX_ACCOUNT_ID_CHARS: usize = 64;
+
 #[derive(Clone)]
 struct AppState {
     registration: Arc<InMemoryRegistrationService>,
+    key_directory: Arc<InMemoryKeyDirectory>,
 }
 
 #[derive(Serialize)]
@@ -43,22 +48,47 @@ pub struct RegistrationResponse {
     pub root_public_key: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyPackageUploadRequest {
+    pub key_package: String,
+    pub binding: KeyPackageBinding,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyPackageClaimRequest {
+    pub account_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyPackageResponse {
+    pub key_package: String,
+    pub binding: KeyPackageBinding,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: &'static str,
 }
 
 enum ApiError {
+    InvalidRequest,
     RegistrationFailed,
     AccountConflict,
+    KeyPackageRejected,
+    KeyPackageConflict,
+    KeyPackageUnavailable,
     ServiceUnavailable,
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = match self {
+            Self::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request"),
             Self::RegistrationFailed => (StatusCode::UNAUTHORIZED, "registration_failed"),
             Self::AccountConflict => (StatusCode::CONFLICT, "account_conflict"),
+            Self::KeyPackageRejected => (StatusCode::UNAUTHORIZED, "key_package_rejected"),
+            Self::KeyPackageConflict => (StatusCode::CONFLICT, "key_package_conflict"),
+            Self::KeyPackageUnavailable => (StatusCode::NOT_FOUND, "key_package_unavailable"),
             Self::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
         };
 
@@ -69,6 +99,7 @@ impl IntoResponse for ApiError {
 pub fn app() -> Router {
     let state = AppState {
         registration: Arc::new(InMemoryRegistrationService::default()),
+        key_directory: Arc::new(InMemoryKeyDirectory::default()),
     };
 
     Router::new()
@@ -78,6 +109,8 @@ pub fn app() -> Router {
             post(issue_registration_challenge),
         )
         .route("/v1/registration", post(register_account))
+        .route("/v1/key-packages", post(upload_key_package))
+        .route("/v1/key-packages/claim", post(claim_key_package))
         .with_state(state)
 }
 
@@ -120,6 +153,59 @@ async fn register_account(
     ))
 }
 
+async fn upload_key_package(
+    State(state): State<AppState>,
+    Json(request): Json<KeyPackageUploadRequest>,
+) -> Result<StatusCode, ApiError> {
+    let key_package = decode_key_package(&request.key_package)?;
+    let account = state
+        .registration
+        .account(&request.binding.account_id)
+        .ok_or(ApiError::KeyPackageRejected)?;
+
+    state
+        .key_directory
+        .upload(
+            &account,
+            PublishedKeyPackage {
+                key_package,
+                binding: request.binding,
+            },
+        )
+        .map_err(map_key_directory_error)?;
+
+    Ok(StatusCode::CREATED)
+}
+
+async fn claim_key_package(
+    State(state): State<AppState>,
+    Json(request): Json<KeyPackageClaimRequest>,
+) -> Result<Json<KeyPackageResponse>, ApiError> {
+    if request.account_id.is_empty() || request.account_id.len() > MAX_ACCOUNT_ID_CHARS {
+        return Err(ApiError::InvalidRequest);
+    }
+
+    let package = state
+        .key_directory
+        .claim(&request.account_id)
+        .map_err(map_key_directory_error)?;
+
+    Ok(Json(KeyPackageResponse {
+        key_package: URL_SAFE_NO_PAD.encode(package.key_package),
+        binding: package.binding,
+    }))
+}
+
+fn decode_key_package(encoded: &str) -> Result<Vec<u8>, ApiError> {
+    let key_package = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| ApiError::InvalidRequest)?;
+    if key_package.is_empty() || key_package.len() > MAX_KEY_PACKAGE_BYTES {
+        return Err(ApiError::InvalidRequest);
+    }
+    Ok(key_package)
+}
+
 fn map_registration_error(error: RegistrationError) -> ApiError {
     match error {
         RegistrationError::UnknownChallenge
@@ -129,5 +215,15 @@ fn map_registration_error(error: RegistrationError) -> ApiError {
         RegistrationError::EntropyUnavailable | RegistrationError::InvalidChallengeLifetime => {
             ApiError::ServiceUnavailable
         }
+    }
+}
+
+fn map_key_directory_error(error: KeyDirectoryError) -> ApiError {
+    match error {
+        KeyDirectoryError::InvalidBinding | KeyDirectoryError::AccountMismatch => {
+            ApiError::KeyPackageRejected
+        }
+        KeyDirectoryError::DuplicateKeyPackage => ApiError::KeyPackageConflict,
+        KeyDirectoryError::NoKeyPackage => ApiError::KeyPackageUnavailable,
     }
 }
