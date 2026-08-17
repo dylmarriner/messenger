@@ -59,3 +59,46 @@ fn registration_proof_binds_account_id_and_root_public_key() {
     changed_key.root_public_key = other_identity.contact_card().root_public_key;
     assert!(changed_key.verify(&challenge_id, &challenge).is_err());
 }
+
+#[test]
+fn key_package_binding_authenticates_exact_package_for_contact_root() {
+    let identity = AccountIdentity::generate().expect("identity");
+    let contact = identity.contact_card();
+    let device_id = [0x55_u8; 16];
+    let key_package = b"serialized-openmls-key-package";
+    let binding = identity
+        .bind_key_package(&device_id, key_package)
+        .expect("key package binding");
+
+    binding.verify(key_package).expect("self-verifying binding");
+    binding
+        .verify_for_contact(&contact, key_package)
+        .expect("binding matches trusted contact");
+
+    let mut tampered_package = key_package.to_vec();
+    tampered_package[0] ^= 0x01;
+    assert!(binding.verify(&tampered_package).is_err());
+}
+
+#[test]
+fn key_package_binding_rejects_device_id_or_contact_substitution() {
+    let identity = AccountIdentity::generate().expect("identity");
+    let other_identity = AccountIdentity::generate().expect("other identity");
+    let key_package = b"serialized-openmls-key-package";
+    let binding = identity
+        .bind_key_package(&[0x66_u8; 16], key_package)
+        .expect("binding");
+    let alternate_binding = identity
+        .bind_key_package(&[0x77_u8; 16], key_package)
+        .expect("alternate binding");
+
+    let mut changed_device = binding.clone();
+    changed_device.device_id = alternate_binding.device_id;
+    assert!(changed_device.verify(key_package).is_err());
+
+    assert!(
+        binding
+            .verify_for_contact(&other_identity.contact_card(), key_package)
+            .is_err()
+    );
+}
