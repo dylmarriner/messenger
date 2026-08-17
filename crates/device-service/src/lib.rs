@@ -231,14 +231,6 @@ impl InMemoryDeviceService {
         let expires_at = now
             .checked_add(self.session_ttl)
             .ok_or(DeviceServiceError::InvalidLifetime)?;
-        let mut token = [0_u8; SESSION_TOKEN_BYTES];
-        let token_digest = loop {
-            getrandom::fill(&mut token).map_err(|_| DeviceServiceError::EntropyUnavailable)?;
-            let digest = session_token_digest(&token);
-            if !self.state().sessions.contains_key(&digest) {
-                break digest;
-            }
-        };
 
         let mut state = self.state();
         self.remove_expired_sessions(&mut state, now);
@@ -247,6 +239,16 @@ impl InMemoryDeviceService {
         {
             return Err(DeviceServiceError::DeviceRevoked);
         }
+
+        let (token, token_digest) = loop {
+            let mut candidate = [0_u8; SESSION_TOKEN_BYTES];
+            getrandom::fill(&mut candidate).map_err(|_| DeviceServiceError::EntropyUnavailable)?;
+            let digest = session_token_digest(&candidate);
+            if !state.sessions.contains_key(&digest) {
+                break (candidate, digest);
+            }
+        };
+
         state.sessions.insert(
             token_digest,
             SessionRecord {
