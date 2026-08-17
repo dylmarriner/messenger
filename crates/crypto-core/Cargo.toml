@@ -11,3 +11,4 @@ ed25519-dalek.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+zeroize.workspace = true
