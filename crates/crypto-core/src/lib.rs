@@ -140,7 +140,7 @@ impl AccountIdentity {
 
         let mut root_secret = Zeroizing::new([0_u8; ROOT_SECRET_BYTES]);
         getrandom::fill(root_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
-        let root_signing_key = SigningKey::from_bytes(root_secret.as_ref());
+        let root_signing_key = SigningKey::from_bytes(&*root_secret);
 
         let account_id = format!(
             "{ACCOUNT_ID_PREFIX}{}",
@@ -253,7 +253,7 @@ impl DeviceIdentity {
 
         let mut auth_secret = Zeroizing::new([0_u8; DEVICE_AUTH_SECRET_BYTES]);
         getrandom::fill(auth_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
-        let auth_signing_key = SigningKey::from_bytes(auth_secret.as_ref());
+        let auth_signing_key = SigningKey::from_bytes(&*auth_secret);
 
         Ok(Self {
             device_id,
@@ -397,6 +397,19 @@ impl DeviceCertificate {
         );
 
         verify_strict(&root_public_key, &payload, &signature)
+    }
+
+    pub fn verify_for_contact(&self, contact: &ContactCard) -> Result<(), CryptoError> {
+        contact.verify()?;
+        self.verify()?;
+        if self.account_id != contact.account_id || self.root_public_key != contact.root_public_key {
+            return Err(CryptoError::ContactMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn device_id_bytes(&self) -> Result<[u8; DEVICE_ID_BYTES], CryptoError> {
+        decode_device_id(&self.device_id)
     }
 }
 
