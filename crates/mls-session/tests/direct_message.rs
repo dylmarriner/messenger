@@ -52,3 +52,16 @@ fn modified_mls_ciphertext_is_rejected() {
 
     assert!(bob.decrypt(&mut bob_group, &ciphertext).is_err());
 }
+
+#[test]
+fn replayed_application_message_is_rejected() {
+    let (alice, mut alice_group, bob, mut bob_group) = established_pair();
+    let ciphertext = alice
+        .encrypt(&mut alice_group, b"single-use sender-ratchet generation")
+        .expect("encrypt application message");
+
+    bob.decrypt(&mut bob_group, &ciphertext)
+        .expect("first delivery succeeds");
+
+    assert!(bob.decrypt(&mut bob_group, &ciphertext).is_err());
+}
