@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use core::mem::size_of;
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
