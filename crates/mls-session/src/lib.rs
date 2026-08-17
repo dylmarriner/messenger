@@ -48,6 +48,8 @@ pub enum MlsError {
     KeyPackageParsing,
     #[error("MLS KeyPackage validation failed")]
     KeyPackageValidation,
+    #[error("MLS KeyPackage credential identity does not match the authorized device")]
+    CredentialIdentityMismatch,
     #[error("failed to create MLS group")]
     GroupCreation,
     #[error("failed to add MLS member")]
@@ -122,6 +124,23 @@ impl MlsClient {
             .map_err(|_| MlsError::Serialization)
     }
 
+    /// Verifies the full KeyPackage and then requires its embedded BasicCredential
+    /// identity to equal the account-authorized device identifier.
+    pub fn validate_key_package_for_device(
+        serialized_key_package: &[u8],
+        expected_device_id: &[u8; DEVICE_CREDENTIAL_ID_BYTES],
+    ) -> Result<(), MlsError> {
+        let provider = OpenMlsRustCrypto::default();
+        let key_package = validate_key_package(&provider, serialized_key_package)?;
+        let basic_credential = BasicCredential::try_from(key_package.leaf_node().credential().clone())
+            .map_err(|_| MlsError::CredentialIdentityMismatch)?;
+
+        if basic_credential.identity() != expected_device_id {
+            return Err(MlsError::CredentialIdentityMismatch);
+        }
+        Ok(())
+    }
+
     pub fn create_group(&self) -> Result<MlsGroupState, MlsError> {
         let config = create_config();
         let group = MlsGroup::new(
@@ -142,11 +161,7 @@ impl MlsClient {
         group: &mut MlsGroupState,
         serialized_key_package: &[u8],
     ) -> Result<Vec<u8>, MlsError> {
-        let key_package_in = KeyPackageIn::tls_deserialize_exact(serialized_key_package)
-            .map_err(|_| MlsError::KeyPackageParsing)?;
-        let key_package = key_package_in
-            .validate(self.provider.crypto(), ProtocolVersion::Mls10)
-            .map_err(|_| MlsError::KeyPackageValidation)?;
+        let key_package = validate_key_package(&self.provider, serialized_key_package)?;
 
         let (_, welcome, _) = group
             .group
@@ -221,6 +236,16 @@ impl MlsClient {
             _ => Err(MlsError::UnexpectedMessageType),
         }
     }
+}
+
+fn validate_key_package(
+    provider: &OpenMlsRustCrypto,
+    serialized_key_package: &[u8],
+) -> Result<KeyPackage, MlsError> {
+    KeyPackageIn::tls_deserialize_exact(serialized_key_package)
+        .map_err(|_| MlsError::KeyPackageParsing)?
+        .validate(provider.crypto(), ProtocolVersion::Mls10)
+        .map_err(|_| MlsError::KeyPackageValidation)
 }
 
 fn create_config() -> MlsGroupCreateConfig {
