@@ -1,0 +1,55 @@
+name: Temporary Clippy Fix
+
+on:
+  push:
+    branches: ["scaffold/phase-1-vertical-slice"]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: scaffold/phase-1-vertical-slice
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Apply exact collapsible-if fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/device-service/src/lib.rs")
+          source = path.read_text()
+          old = '''        if let Some(existing_device_id) = state.mailbox_to_device.get(&certificate.mailbox_id) {
+            if existing_device_id != &certificate.device_id {
+                return Err(DeviceServiceError::MailboxConflict);
+            }
+        }
+'''
+          new = '''        if let Some(existing_device_id) = state.mailbox_to_device.get(&certificate.mailbox_id)
+            && existing_device_id != &certificate.device_id
+        {
+            return Err(DeviceServiceError::MailboxConflict);
+        }
+'''
+          if source.count(old) != 1:
+              raise SystemExit("expected exactly one mailbox conflict block")
+          path.write_text(source.replace(old, new))
+          PY
+          cargo fmt --all
+      - name: Commit exact fix
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/device-service/src/lib.rs
+          git commit -m "fix(device): collapse mailbox conflict guard"
+          git push origin HEAD:scaffold/phase-1-vertical-slice

@@ -1,0 +1,19 @@
+[package]
+name = "messenger-mls-session"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+openmls.workspace = true
+openmls_basic_credential.workspace = true
+openmls_rust_crypto.workspace = true
+openmls_traits.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+messenger-protocol = { path = "../protocol" }
+messenger-relay = { path = "../relay" }
+uuid.workspace = true

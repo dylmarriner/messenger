@@ -1,0 +1,24 @@
+[package]
+name = "messenger-gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+messenger-crypto-core = { path = "../../crates/crypto-core" }
+messenger-device-service = { path = "../../crates/device-service" }
+messenger-key-directory = { path = "../../crates/key-directory" }
+messenger-protocol = { path = "../../crates/protocol" }
+messenger-registration = { path = "../../crates/registration" }
+messenger-relay = { path = "../../crates/relay" }
+serde.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+messenger-mls-session = { path = "../../crates/mls-session" }
+serde_json.workspace = true
+tower.workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "messenger-registration"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+messenger-crypto-core = { path = "../crypto-core" }
+thiserror.workspace = true
+uuid.workspace = true

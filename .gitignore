@@ -1,0 +1,12 @@
+/target
+**/.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.iml
+local.properties
+DerivedData/
+.build/
+xcuserdata/
