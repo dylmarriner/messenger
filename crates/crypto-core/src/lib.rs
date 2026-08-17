@@ -7,12 +7,16 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 const CONTACT_CARD_VERSION: u8 = 1;
+const REGISTRATION_PROOF_VERSION: u8 = 1;
 const ACCOUNT_ID_PREFIX: &str = "a1_";
 const CONTACT_CARD_DOMAIN: &[u8] = b"messenger-contact-card-v1\0";
+const REGISTRATION_DOMAIN: &[u8] = b"messenger-registration-v1\0";
 const ACCOUNT_ID_BYTES: usize = 16;
 const ROOT_SECRET_BYTES: usize = 32;
 const ROOT_PUBLIC_KEY_BYTES: usize = 32;
 const SIGNATURE_BYTES: usize = 64;
+const CHALLENGE_ID_BYTES: usize = 16;
+const CHALLENGE_BYTES: usize = 32;
 
 /// Client-held anonymous account identity.
 ///
@@ -32,19 +36,29 @@ pub struct ContactCard {
     pub signature: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegistrationProof {
+    pub version: u8,
+    pub account_id: String,
+    pub root_public_key: String,
+    pub signature: String,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CryptoError {
     #[error("operating-system entropy source unavailable")]
     EntropyUnavailable,
     #[error("unsupported contact-card version {0}")]
     UnsupportedContactCardVersion(u8),
+    #[error("unsupported registration-proof version {0}")]
+    UnsupportedRegistrationProofVersion(u8),
     #[error("invalid account identifier")]
     InvalidAccountId,
     #[error("invalid account-root public key")]
     InvalidPublicKey,
-    #[error("invalid contact-card signature encoding")]
+    #[error("invalid signature encoding")]
     InvalidSignature,
-    #[error("contact-card signature verification failed")]
+    #[error("signature verification failed")]
     VerificationFailed,
 }
 
@@ -85,6 +99,28 @@ impl AccountIdentity {
             signature: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
         }
     }
+
+    pub fn registration_proof(
+        &self,
+        challenge_id: &[u8; CHALLENGE_ID_BYTES],
+        challenge: &[u8; CHALLENGE_BYTES],
+    ) -> RegistrationProof {
+        let root_public_key = self.root_signing_key.verifying_key().to_bytes();
+        let payload = registration_payload(
+            challenge_id,
+            challenge,
+            &self.account_id_raw,
+            &root_public_key,
+        );
+        let signature: Signature = self.root_signing_key.sign(&payload);
+
+        RegistrationProof {
+            version: REGISTRATION_PROOF_VERSION,
+            account_id: self.account_id.clone(),
+            root_public_key: URL_SAFE_NO_PAD.encode(root_public_key),
+            signature: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+        }
+    }
 }
 
 impl ContactCard {
@@ -94,24 +130,49 @@ impl ContactCard {
         }
 
         let account_id_raw = decode_account_id(&self.account_id)?;
-        let root_public_key = decode_fixed::<ROOT_PUBLIC_KEY_BYTES, _>(
-            &self.root_public_key,
-            || CryptoError::InvalidPublicKey,
-        )?;
-        let signature_bytes = decode_fixed::<SIGNATURE_BYTES, _>(
-            &self.signature,
-            || CryptoError::InvalidSignature,
-        )?;
-
-        let verifying_key = VerifyingKey::from_bytes(&root_public_key)
-            .map_err(|_| CryptoError::InvalidPublicKey)?;
-        let signature = Signature::from_bytes(&signature_bytes);
+        let root_public_key = decode_public_key(&self.root_public_key)?;
+        let signature = decode_signature(&self.signature)?;
         let payload = contact_card_payload(&account_id_raw, &root_public_key);
 
-        verifying_key
-            .verify_strict(&payload, &signature)
-            .map_err(|_| CryptoError::VerificationFailed)
+        verify_strict(&root_public_key, &payload, &signature)
     }
+}
+
+impl RegistrationProof {
+    pub fn verify(
+        &self,
+        challenge_id: &[u8; CHALLENGE_ID_BYTES],
+        challenge: &[u8; CHALLENGE_BYTES],
+    ) -> Result<(), CryptoError> {
+        if self.version != REGISTRATION_PROOF_VERSION {
+            return Err(CryptoError::UnsupportedRegistrationProofVersion(self.version));
+        }
+
+        let account_id_raw = decode_account_id(&self.account_id)?;
+        let root_public_key = decode_public_key(&self.root_public_key)?;
+        let signature = decode_signature(&self.signature)?;
+        let payload = registration_payload(
+            challenge_id,
+            challenge,
+            &account_id_raw,
+            &root_public_key,
+        );
+
+        verify_strict(&root_public_key, &payload, &signature)
+    }
+}
+
+fn verify_strict(
+    root_public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
+    payload: &[u8],
+    signature: &Signature,
+) -> Result<(), CryptoError> {
+    let verifying_key = VerifyingKey::from_bytes(root_public_key)
+        .map_err(|_| CryptoError::InvalidPublicKey)?;
+
+    verifying_key
+        .verify_strict(payload, signature)
+        .map_err(|_| CryptoError::VerificationFailed)
 }
 
 fn decode_account_id(value: &str) -> Result<[u8; ACCOUNT_ID_BYTES], CryptoError> {
@@ -120,6 +181,15 @@ fn decode_account_id(value: &str) -> Result<[u8; ACCOUNT_ID_BYTES], CryptoError>
         .ok_or(CryptoError::InvalidAccountId)?;
 
     decode_fixed::<ACCOUNT_ID_BYTES, _>(encoded, || CryptoError::InvalidAccountId)
+}
+
+fn decode_public_key(value: &str) -> Result<[u8; ROOT_PUBLIC_KEY_BYTES], CryptoError> {
+    decode_fixed::<ROOT_PUBLIC_KEY_BYTES, _>(value, || CryptoError::InvalidPublicKey)
+}
+
+fn decode_signature(value: &str) -> Result<Signature, CryptoError> {
+    let bytes = decode_fixed::<SIGNATURE_BYTES, _>(value, || CryptoError::InvalidSignature)?;
+    Ok(Signature::from_bytes(&bytes))
 }
 
 fn decode_fixed<const N: usize, F>(value: &str, error: F) -> Result<[u8; N], CryptoError>
@@ -138,6 +208,27 @@ fn contact_card_payload(
         CONTACT_CARD_DOMAIN.len() + ACCOUNT_ID_BYTES + ROOT_PUBLIC_KEY_BYTES,
     );
     payload.extend_from_slice(CONTACT_CARD_DOMAIN);
+    payload.extend_from_slice(account_id_raw);
+    payload.extend_from_slice(root_public_key);
+    payload
+}
+
+fn registration_payload(
+    challenge_id: &[u8; CHALLENGE_ID_BYTES],
+    challenge: &[u8; CHALLENGE_BYTES],
+    account_id_raw: &[u8; ACCOUNT_ID_BYTES],
+    root_public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(
+        REGISTRATION_DOMAIN.len()
+            + CHALLENGE_ID_BYTES
+            + CHALLENGE_BYTES
+            + ACCOUNT_ID_BYTES
+            + ROOT_PUBLIC_KEY_BYTES,
+    );
+    payload.extend_from_slice(REGISTRATION_DOMAIN);
+    payload.extend_from_slice(challenge_id);
+    payload.extend_from_slice(challenge);
     payload.extend_from_slice(account_id_raw);
     payload.extend_from_slice(root_public_key);
     payload
