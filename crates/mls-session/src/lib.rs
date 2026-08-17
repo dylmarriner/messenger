@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use openmls::prelude::{tls_codec::*, *};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
@@ -25,9 +27,11 @@ pub struct MlsClient {
 /// Opaque project-level wrapper around OpenMLS group state.
 ///
 /// Keeping the raw `MlsGroup` private prevents application code from bypassing
-/// the protocol policy centralized in this crate.
+/// the protocol policy centralized in this crate. If the dependency panics while
+/// handling hostile input, the state is poisoned and cannot be used again.
 pub struct MlsGroupState {
     group: MlsGroup,
+    poisoned: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -68,6 +72,10 @@ pub enum MlsError {
     MessageProcessing,
     #[error("incoming MLS message is not application data")]
     UnexpectedMessageType,
+    #[error("MLS dependency panicked while processing untrusted input")]
+    DependencyPanic,
+    #[error("MLS group state is poisoned and must be re-established")]
+    GroupPoisoned,
 }
 
 impl MlsClient {
@@ -149,7 +157,10 @@ impl MlsClient {
         )
         .map_err(|_| MlsError::GroupCreation)?;
 
-        Ok(MlsGroupState { group })
+        Ok(MlsGroupState {
+            group,
+            poisoned: false,
+        })
     }
 
     /// Validates and consumes another device's public KeyPackage, returning the
@@ -159,6 +170,7 @@ impl MlsClient {
         group: &mut MlsGroupState,
         serialized_key_package: &[u8],
     ) -> Result<Vec<u8>, MlsError> {
+        ensure_group_usable(group)?;
         let key_package = validate_key_package(&self.provider, serialized_key_package)?;
 
         let (_, welcome, _) = group
@@ -197,7 +209,10 @@ impl MlsClient {
             .into_group(&self.provider)
             .map_err(|_| MlsError::WelcomeJoin)?;
 
-        Ok(MlsGroupState { group })
+        Ok(MlsGroupState {
+            group,
+            poisoned: false,
+        })
     }
 
     pub fn encrypt(
@@ -205,6 +220,7 @@ impl MlsClient {
         group: &mut MlsGroupState,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, MlsError> {
+        ensure_group_usable(group)?;
         group
             .group
             .create_message(&self.provider, &self.signer, plaintext)
@@ -218,15 +234,27 @@ impl MlsClient {
         group: &mut MlsGroupState,
         serialized_message: &[u8],
     ) -> Result<Vec<u8>, MlsError> {
+        ensure_group_usable(group)?;
         let message = MlsMessageIn::tls_deserialize_exact(serialized_message)
             .map_err(|_| MlsError::MessageParsing)?;
         let protocol_message = message
             .try_into_protocol_message()
             .map_err(|_| MlsError::ProtocolMessageExpected)?;
-        let processed = group
-            .group
-            .process_message(&self.provider, protocol_message)
-            .map_err(|_| MlsError::MessageProcessing)?;
+
+        let processed = match catch_unwind(AssertUnwindSafe(|| {
+            group
+                .group
+                .process_message(&self.provider, protocol_message)
+        })) {
+            Ok(result) => result.map_err(|_| MlsError::MessageProcessing)?,
+            Err(_) => {
+                // OpenMLS 0.8.1 contains a debug assertion on one AEAD-failure
+                // path. Because the dependency may have advanced its secret tree
+                // before panicking, fail closed and require group re-establishment.
+                group.poisoned = true;
+                return Err(MlsError::DependencyPanic);
+            }
+        };
 
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(application_message) => {
@@ -235,6 +263,13 @@ impl MlsClient {
             _ => Err(MlsError::UnexpectedMessageType),
         }
     }
+}
+
+fn ensure_group_usable(group: &MlsGroupState) -> Result<(), MlsError> {
+    if group.poisoned {
+        return Err(MlsError::GroupPoisoned);
+    }
+    Ok(())
 }
 
 fn validate_key_package(
