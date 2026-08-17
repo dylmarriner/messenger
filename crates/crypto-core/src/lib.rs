@@ -140,7 +140,7 @@ impl AccountIdentity {
 
         let mut root_secret = Zeroizing::new([0_u8; ROOT_SECRET_BYTES]);
         getrandom::fill(root_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
-        let root_signing_key = SigningKey::from_bytes(&*root_secret);
+        let root_signing_key = SigningKey::from_bytes(&root_secret);
 
         let account_id = format!(
             "{ACCOUNT_ID_PREFIX}{}",
@@ -253,7 +253,7 @@ impl DeviceIdentity {
 
         let mut auth_secret = Zeroizing::new([0_u8; DEVICE_AUTH_SECRET_BYTES]);
         getrandom::fill(auth_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
-        let auth_signing_key = SigningKey::from_bytes(&*auth_secret);
+        let auth_signing_key = SigningKey::from_bytes(&auth_secret);
 
         Ok(Self {
             device_id,
