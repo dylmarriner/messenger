@@ -11,14 +11,22 @@ use zeroize::Zeroizing;
 const CONTACT_CARD_VERSION: u8 = 1;
 const REGISTRATION_PROOF_VERSION: u8 = 1;
 const KEY_PACKAGE_BINDING_VERSION: u8 = 1;
+const DEVICE_CERTIFICATE_VERSION: u8 = 1;
+const DEVICE_AUTH_PROOF_VERSION: u8 = 1;
 const ACCOUNT_ID_PREFIX: &str = "a1_";
+const MAILBOX_ID_PREFIX: &str = "m1_";
 const CONTACT_CARD_DOMAIN: &[u8] = b"messenger-contact-card-v1\0";
 const REGISTRATION_DOMAIN: &[u8] = b"messenger-registration-v1\0";
 const KEY_PACKAGE_BINDING_DOMAIN: &[u8] = b"messenger-key-package-binding-v1\0";
+const DEVICE_CERTIFICATE_DOMAIN: &[u8] = b"messenger-device-certificate-v1\0";
+const DEVICE_AUTH_DOMAIN: &[u8] = b"messenger-device-auth-v1\0";
 const ACCOUNT_ID_BYTES: usize = 16;
 const DEVICE_ID_BYTES: usize = 16;
+const MAILBOX_ID_BYTES: usize = 32;
 const ROOT_SECRET_BYTES: usize = 32;
+const DEVICE_AUTH_SECRET_BYTES: usize = 32;
 const ROOT_PUBLIC_KEY_BYTES: usize = 32;
+const DEVICE_AUTH_PUBLIC_KEY_BYTES: usize = 32;
 const SIGNATURE_BYTES: usize = 64;
 const CHALLENGE_ID_BYTES: usize = 16;
 const CHALLENGE_BYTES: usize = 32;
@@ -31,6 +39,18 @@ pub struct AccountIdentity {
     account_id: String,
     account_id_raw: [u8; ACCOUNT_ID_BYTES],
     root_signing_key: SigningKey,
+}
+
+/// Client-held per-installation authentication identity.
+///
+/// Device authentication is intentionally independent from the account-root
+/// signing key. This type also does not implement `Serialize` or `Debug`.
+pub struct DeviceIdentity {
+    device_id: [u8; DEVICE_ID_BYTES],
+    device_id_encoded: String,
+    mailbox_id_raw: [u8; MAILBOX_ID_BYTES],
+    mailbox_id: String,
+    auth_signing_key: SigningKey,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +78,25 @@ pub struct KeyPackageBinding {
     pub signature: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceCertificate {
+    pub version: u8,
+    pub account_id: String,
+    pub root_public_key: String,
+    pub device_id: String,
+    pub device_auth_public_key: String,
+    pub mailbox_id: String,
+    pub signature: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceAuthProof {
+    pub version: u8,
+    pub device_id: String,
+    pub mailbox_id: String,
+    pub signature: String,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CryptoError {
     #[error("operating-system entropy source unavailable")]
@@ -68,12 +107,20 @@ pub enum CryptoError {
     UnsupportedRegistrationProofVersion(u8),
     #[error("unsupported key-package-binding version {0}")]
     UnsupportedKeyPackageBindingVersion(u8),
+    #[error("unsupported device-certificate version {0}")]
+    UnsupportedDeviceCertificateVersion(u8),
+    #[error("unsupported device-auth-proof version {0}")]
+    UnsupportedDeviceAuthProofVersion(u8),
     #[error("invalid account identifier")]
     InvalidAccountId,
     #[error("invalid device identifier")]
     InvalidDeviceId,
+    #[error("invalid mailbox identifier")]
+    InvalidMailboxId,
     #[error("invalid account-root public key")]
     InvalidPublicKey,
+    #[error("invalid device-auth public key")]
+    InvalidDeviceAuthPublicKey,
     #[error("invalid signature encoding")]
     InvalidSignature,
     #[error("signature verification failed")]
@@ -82,6 +129,8 @@ pub enum CryptoError {
     KeyPackageTooLarge,
     #[error("key package binding does not match trusted contact identity")]
     ContactMismatch,
+    #[error("device-auth proof does not match the root-signed device certificate")]
+    DeviceMismatch,
 }
 
 impl AccountIdentity {
@@ -169,6 +218,87 @@ impl AccountIdentity {
             signature: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
         })
     }
+
+    pub fn authorize_device(&self, device: &DeviceIdentity) -> DeviceCertificate {
+        let root_public_key = self.root_signing_key.verifying_key().to_bytes();
+        let device_auth_public_key = device.auth_signing_key.verifying_key().to_bytes();
+        let payload = device_certificate_payload(
+            &self.account_id_raw,
+            &root_public_key,
+            &device.device_id,
+            &device_auth_public_key,
+            &device.mailbox_id_raw,
+        );
+        let signature: Signature = self.root_signing_key.sign(&payload);
+
+        DeviceCertificate {
+            version: DEVICE_CERTIFICATE_VERSION,
+            account_id: self.account_id.clone(),
+            root_public_key: URL_SAFE_NO_PAD.encode(root_public_key),
+            device_id: device.device_id_encoded.clone(),
+            device_auth_public_key: URL_SAFE_NO_PAD.encode(device_auth_public_key),
+            mailbox_id: device.mailbox_id.clone(),
+            signature: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+        }
+    }
+}
+
+impl DeviceIdentity {
+    pub fn generate() -> Result<Self, CryptoError> {
+        let mut device_id = [0_u8; DEVICE_ID_BYTES];
+        getrandom::fill(&mut device_id).map_err(|_| CryptoError::EntropyUnavailable)?;
+
+        let mut mailbox_id_raw = [0_u8; MAILBOX_ID_BYTES];
+        getrandom::fill(&mut mailbox_id_raw).map_err(|_| CryptoError::EntropyUnavailable)?;
+
+        let mut auth_secret = Zeroizing::new([0_u8; DEVICE_AUTH_SECRET_BYTES]);
+        getrandom::fill(auth_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
+        let auth_signing_key = SigningKey::from_bytes(auth_secret.as_ref());
+
+        Ok(Self {
+            device_id,
+            device_id_encoded: URL_SAFE_NO_PAD.encode(device_id),
+            mailbox_id_raw,
+            mailbox_id: format!(
+                "{MAILBOX_ID_PREFIX}{}",
+                URL_SAFE_NO_PAD.encode(mailbox_id_raw)
+            ),
+            auth_signing_key,
+        })
+    }
+
+    pub fn device_id(&self) -> [u8; DEVICE_ID_BYTES] {
+        self.device_id
+    }
+
+    pub fn device_id_encoded(&self) -> &str {
+        &self.device_id_encoded
+    }
+
+    pub fn mailbox_id(&self) -> &str {
+        &self.mailbox_id
+    }
+
+    pub fn authentication_proof(
+        &self,
+        challenge_id: &[u8; CHALLENGE_ID_BYTES],
+        challenge: &[u8; CHALLENGE_BYTES],
+    ) -> DeviceAuthProof {
+        let payload = device_auth_payload(
+            challenge_id,
+            challenge,
+            &self.device_id,
+            &self.mailbox_id_raw,
+        );
+        let signature: Signature = self.auth_signing_key.sign(&payload);
+
+        DeviceAuthProof {
+            version: DEVICE_AUTH_PROOF_VERSION,
+            device_id: self.device_id_encoded.clone(),
+            mailbox_id: self.mailbox_id.clone(),
+            signature: URL_SAFE_NO_PAD.encode(signature.to_bytes()),
+        }
+    }
 }
 
 impl ContactCard {
@@ -246,12 +376,61 @@ impl KeyPackageBinding {
     }
 }
 
+impl DeviceCertificate {
+    pub fn verify(&self) -> Result<(), CryptoError> {
+        if self.version != DEVICE_CERTIFICATE_VERSION {
+            return Err(CryptoError::UnsupportedDeviceCertificateVersion(self.version));
+        }
+
+        let account_id_raw = decode_account_id(&self.account_id)?;
+        let root_public_key = decode_public_key(&self.root_public_key)?;
+        let device_id = decode_device_id(&self.device_id)?;
+        let device_auth_public_key = decode_device_auth_public_key(&self.device_auth_public_key)?;
+        let mailbox_id_raw = decode_mailbox_id(&self.mailbox_id)?;
+        let signature = decode_signature(&self.signature)?;
+        let payload = device_certificate_payload(
+            &account_id_raw,
+            &root_public_key,
+            &device_id,
+            &device_auth_public_key,
+            &mailbox_id_raw,
+        );
+
+        verify_strict(&root_public_key, &payload, &signature)
+    }
+}
+
+impl DeviceAuthProof {
+    pub fn verify(
+        &self,
+        certificate: &DeviceCertificate,
+        challenge_id: &[u8; CHALLENGE_ID_BYTES],
+        challenge: &[u8; CHALLENGE_BYTES],
+    ) -> Result<(), CryptoError> {
+        if self.version != DEVICE_AUTH_PROOF_VERSION {
+            return Err(CryptoError::UnsupportedDeviceAuthProofVersion(self.version));
+        }
+        certificate.verify()?;
+        if self.device_id != certificate.device_id || self.mailbox_id != certificate.mailbox_id {
+            return Err(CryptoError::DeviceMismatch);
+        }
+
+        let device_id = decode_device_id(&self.device_id)?;
+        let mailbox_id_raw = decode_mailbox_id(&self.mailbox_id)?;
+        let device_auth_public_key = decode_device_auth_public_key(&certificate.device_auth_public_key)?;
+        let signature = decode_signature(&self.signature)?;
+        let payload = device_auth_payload(challenge_id, challenge, &device_id, &mailbox_id_raw);
+
+        verify_strict(&device_auth_public_key, &payload, &signature)
+    }
+}
+
 fn verify_strict(
-    root_public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
+    public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
     payload: &[u8],
     signature: &Signature,
 ) -> Result<(), CryptoError> {
-    let verifying_key = VerifyingKey::from_bytes(root_public_key)
+    let verifying_key = VerifyingKey::from_bytes(public_key)
         .map_err(|_| CryptoError::InvalidPublicKey)?;
 
     verifying_key
@@ -271,8 +450,23 @@ fn decode_device_id(value: &str) -> Result<[u8; DEVICE_ID_BYTES], CryptoError> {
     decode_fixed::<DEVICE_ID_BYTES, _>(value, || CryptoError::InvalidDeviceId)
 }
 
+fn decode_mailbox_id(value: &str) -> Result<[u8; MAILBOX_ID_BYTES], CryptoError> {
+    let encoded = value
+        .strip_prefix(MAILBOX_ID_PREFIX)
+        .ok_or(CryptoError::InvalidMailboxId)?;
+    decode_fixed::<MAILBOX_ID_BYTES, _>(encoded, || CryptoError::InvalidMailboxId)
+}
+
 fn decode_public_key(value: &str) -> Result<[u8; ROOT_PUBLIC_KEY_BYTES], CryptoError> {
     decode_fixed::<ROOT_PUBLIC_KEY_BYTES, _>(value, || CryptoError::InvalidPublicKey)
+}
+
+fn decode_device_auth_public_key(
+    value: &str,
+) -> Result<[u8; DEVICE_AUTH_PUBLIC_KEY_BYTES], CryptoError> {
+    decode_fixed::<DEVICE_AUTH_PUBLIC_KEY_BYTES, _>(value, || {
+        CryptoError::InvalidDeviceAuthPublicKey
+    })
 }
 
 fn decode_signature(value: &str) -> Result<Signature, CryptoError> {
@@ -343,5 +537,50 @@ fn key_package_binding_payload(
     payload.extend_from_slice(root_public_key);
     payload.extend_from_slice(&key_package_len.to_be_bytes());
     payload.extend_from_slice(key_package);
+    payload
+}
+
+fn device_certificate_payload(
+    account_id_raw: &[u8; ACCOUNT_ID_BYTES],
+    root_public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
+    device_id: &[u8; DEVICE_ID_BYTES],
+    device_auth_public_key: &[u8; DEVICE_AUTH_PUBLIC_KEY_BYTES],
+    mailbox_id_raw: &[u8; MAILBOX_ID_BYTES],
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(
+        DEVICE_CERTIFICATE_DOMAIN.len()
+            + ACCOUNT_ID_BYTES
+            + ROOT_PUBLIC_KEY_BYTES
+            + DEVICE_ID_BYTES
+            + DEVICE_AUTH_PUBLIC_KEY_BYTES
+            + MAILBOX_ID_BYTES,
+    );
+    payload.extend_from_slice(DEVICE_CERTIFICATE_DOMAIN);
+    payload.extend_from_slice(account_id_raw);
+    payload.extend_from_slice(root_public_key);
+    payload.extend_from_slice(device_id);
+    payload.extend_from_slice(device_auth_public_key);
+    payload.extend_from_slice(mailbox_id_raw);
+    payload
+}
+
+fn device_auth_payload(
+    challenge_id: &[u8; CHALLENGE_ID_BYTES],
+    challenge: &[u8; CHALLENGE_BYTES],
+    device_id: &[u8; DEVICE_ID_BYTES],
+    mailbox_id_raw: &[u8; MAILBOX_ID_BYTES],
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(
+        DEVICE_AUTH_DOMAIN.len()
+            + CHALLENGE_ID_BYTES
+            + CHALLENGE_BYTES
+            + DEVICE_ID_BYTES
+            + MAILBOX_ID_BYTES,
+    );
+    payload.extend_from_slice(DEVICE_AUTH_DOMAIN);
+    payload.extend_from_slice(challenge_id);
+    payload.extend_from_slice(challenge);
+    payload.extend_from_slice(device_id);
+    payload.extend_from_slice(mailbox_id_raw);
     payload
 }
