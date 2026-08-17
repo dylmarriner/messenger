@@ -16,13 +16,13 @@ fn relay_transports_only_serialized_mls_ciphertext() {
     let mut bob_group = bob.join_from_welcome(&welcome).expect("bob joins group");
 
     let plaintext = b"opaque relay vertical slice";
-    let mls_ciphertext = alice
-        .encrypt(&mut alice_group, plaintext)
-        .expect("encrypt");
+    let mls_ciphertext = alice.encrypt(&mut alice_group, plaintext).expect("encrypt");
 
-    assert!(!mls_ciphertext
-        .windows(plaintext.len())
-        .any(|window| window == plaintext));
+    assert!(
+        !mls_ciphertext
+            .windows(plaintext.len())
+            .any(|window| window == plaintext)
+    );
 
     let relay = InMemoryRelay::default();
     relay

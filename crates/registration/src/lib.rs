@@ -90,13 +90,9 @@ impl InMemoryRegistrationService {
             }
         };
 
-        state.challenges.insert(
-            id,
-            ChallengeRecord {
-                bytes,
-                expires_at,
-            },
-        );
+        state
+            .challenges
+            .insert(id, ChallengeRecord { bytes, expires_at });
 
         Ok(RegistrationChallenge { id, bytes })
     }

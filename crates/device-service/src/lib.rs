@@ -142,9 +142,10 @@ impl InMemoryDeviceService {
         let registered = RegisteredDevice {
             certificate: certificate.clone(),
         };
-        state
-            .mailbox_to_device
-            .insert(certificate.mailbox_id.clone(), certificate.device_id.clone());
+        state.mailbox_to_device.insert(
+            certificate.mailbox_id.clone(),
+            certificate.device_id.clone(),
+        );
         state
             .devices
             .insert(certificate.device_id.clone(), registered.clone());
@@ -220,7 +221,11 @@ impl InMemoryDeviceService {
         };
 
         proof
-            .verify(&device.certificate, challenge_id.as_bytes(), &challenge.bytes)
+            .verify(
+                &device.certificate,
+                challenge_id.as_bytes(),
+                &challenge.bytes,
+            )
             .map_err(|_| DeviceServiceError::InvalidProof)?;
 
         let expires_at = now
@@ -317,9 +322,7 @@ impl InMemoryDeviceService {
     }
 
     fn remove_expired_sessions(&self, state: &mut DeviceServiceState, now: Instant) {
-        state
-            .sessions
-            .retain(|_, session| session.expires_at > now);
+        state.sessions.retain(|_, session| session.expires_at > now);
     }
 
     fn state(&self) -> MutexGuard<'_, DeviceServiceState> {

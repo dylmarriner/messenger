@@ -1,7 +1,10 @@
 use messenger_mls_session::{MlsClient, MlsError};
 
 fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && haystack.windows(needle.len()).any(|window| window == needle)
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 fn established_pair() -> (

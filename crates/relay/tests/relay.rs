@@ -47,8 +47,14 @@ fn mailbox_retrieval_is_non_destructive_until_acknowledged() {
     };
     relay.enqueue(envelope.clone()).expect("enqueue");
 
-    assert_eq!(relay.retrieve_mailbox("mailbox-test"), vec![envelope.clone()]);
-    assert_eq!(relay.retrieve_mailbox("mailbox-test"), vec![envelope.clone()]);
+    assert_eq!(
+        relay.retrieve_mailbox("mailbox-test"),
+        vec![envelope.clone()]
+    );
+    assert_eq!(
+        relay.retrieve_mailbox("mailbox-test"),
+        vec![envelope.clone()]
+    );
 
     assert_eq!(
         relay.acknowledge("mailbox-test", &[envelope.envelope_id]),
@@ -84,8 +90,5 @@ fn acknowledgement_only_removes_named_envelopes_from_that_mailbox() {
 
     assert_eq!(relay.acknowledge("mailbox-test", &[first.envelope_id]), 1);
     assert_eq!(relay.retrieve_mailbox("mailbox-test"), vec![second]);
-    assert_eq!(
-        relay.retrieve_mailbox("other-mailbox"),
-        vec![other_mailbox]
-    );
+    assert_eq!(relay.retrieve_mailbox("other-mailbox"), vec![other_mailbox]);
 }

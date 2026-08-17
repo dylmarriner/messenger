@@ -10,7 +10,10 @@ fn device_certificate_is_bound_to_trusted_contact_root_and_exposes_device_bytes(
     certificate
         .verify_for_contact(&account.contact_card())
         .expect("trusted contact certificate");
-    assert_eq!(certificate.device_id_bytes().expect("device id"), device.device_id());
+    assert_eq!(
+        certificate.device_id_bytes().expect("device id"),
+        device.device_id()
+    );
     assert!(
         certificate
             .verify_for_contact(&other.contact_card())

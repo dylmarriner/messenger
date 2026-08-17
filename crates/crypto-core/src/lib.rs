@@ -2,7 +2,7 @@
 
 use core::mem::size_of;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -323,18 +323,16 @@ impl RegistrationProof {
         challenge: &[u8; CHALLENGE_BYTES],
     ) -> Result<(), CryptoError> {
         if self.version != REGISTRATION_PROOF_VERSION {
-            return Err(CryptoError::UnsupportedRegistrationProofVersion(self.version));
+            return Err(CryptoError::UnsupportedRegistrationProofVersion(
+                self.version,
+            ));
         }
 
         let account_id_raw = decode_account_id(&self.account_id)?;
         let root_public_key = decode_public_key(&self.root_public_key)?;
         let signature = decode_signature(&self.signature)?;
-        let payload = registration_payload(
-            challenge_id,
-            challenge,
-            &account_id_raw,
-            &root_public_key,
-        );
+        let payload =
+            registration_payload(challenge_id, challenge, &account_id_raw, &root_public_key);
 
         verify_strict(&root_public_key, &payload, &signature)
     }
@@ -343,7 +341,9 @@ impl RegistrationProof {
 impl KeyPackageBinding {
     pub fn verify(&self, key_package: &[u8]) -> Result<(), CryptoError> {
         if self.version != KEY_PACKAGE_BINDING_VERSION {
-            return Err(CryptoError::UnsupportedKeyPackageBindingVersion(self.version));
+            return Err(CryptoError::UnsupportedKeyPackageBindingVersion(
+                self.version,
+            ));
         }
 
         let account_id_raw = decode_account_id(&self.account_id)?;
@@ -369,7 +369,8 @@ impl KeyPackageBinding {
         key_package: &[u8],
     ) -> Result<(), CryptoError> {
         contact.verify()?;
-        if self.account_id != contact.account_id || self.root_public_key != contact.root_public_key {
+        if self.account_id != contact.account_id || self.root_public_key != contact.root_public_key
+        {
             return Err(CryptoError::ContactMismatch);
         }
         self.verify(key_package)
@@ -379,7 +380,9 @@ impl KeyPackageBinding {
 impl DeviceCertificate {
     pub fn verify(&self) -> Result<(), CryptoError> {
         if self.version != DEVICE_CERTIFICATE_VERSION {
-            return Err(CryptoError::UnsupportedDeviceCertificateVersion(self.version));
+            return Err(CryptoError::UnsupportedDeviceCertificateVersion(
+                self.version,
+            ));
         }
 
         let account_id_raw = decode_account_id(&self.account_id)?;
@@ -402,7 +405,8 @@ impl DeviceCertificate {
     pub fn verify_for_contact(&self, contact: &ContactCard) -> Result<(), CryptoError> {
         contact.verify()?;
         self.verify()?;
-        if self.account_id != contact.account_id || self.root_public_key != contact.root_public_key {
+        if self.account_id != contact.account_id || self.root_public_key != contact.root_public_key
+        {
             return Err(CryptoError::ContactMismatch);
         }
         Ok(())
@@ -430,7 +434,8 @@ impl DeviceAuthProof {
 
         let device_id = decode_device_id(&self.device_id)?;
         let mailbox_id_raw = decode_mailbox_id(&self.mailbox_id)?;
-        let device_auth_public_key = decode_device_auth_public_key(&certificate.device_auth_public_key)?;
+        let device_auth_public_key =
+            decode_device_auth_public_key(&certificate.device_auth_public_key)?;
         let signature = decode_signature(&self.signature)?;
         let payload = device_auth_payload(challenge_id, challenge, &device_id, &mailbox_id_raw);
 
@@ -443,8 +448,8 @@ fn verify_strict(
     payload: &[u8],
     signature: &Signature,
 ) -> Result<(), CryptoError> {
-    let verifying_key = VerifyingKey::from_bytes(public_key)
-        .map_err(|_| CryptoError::InvalidPublicKey)?;
+    let verifying_key =
+        VerifyingKey::from_bytes(public_key).map_err(|_| CryptoError::InvalidPublicKey)?;
 
     verifying_key
         .verify_strict(payload, signature)
@@ -499,9 +504,8 @@ fn contact_card_payload(
     account_id_raw: &[u8; ACCOUNT_ID_BYTES],
     root_public_key: &[u8; ROOT_PUBLIC_KEY_BYTES],
 ) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(
-        CONTACT_CARD_DOMAIN.len() + ACCOUNT_ID_BYTES + ROOT_PUBLIC_KEY_BYTES,
-    );
+    let mut payload =
+        Vec::with_capacity(CONTACT_CARD_DOMAIN.len() + ACCOUNT_ID_BYTES + ROOT_PUBLIC_KEY_BYTES);
     payload.extend_from_slice(CONTACT_CARD_DOMAIN);
     payload.extend_from_slice(account_id_raw);
     payload.extend_from_slice(root_public_key);

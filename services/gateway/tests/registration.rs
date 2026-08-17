@@ -4,7 +4,9 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use messenger_crypto_core::AccountIdentity;
-use messenger_gateway::{RegistrationChallengeResponse, RegistrationRequest, RegistrationResponse, app};
+use messenger_gateway::{
+    RegistrationChallengeResponse, RegistrationRequest, RegistrationResponse, app,
+};
 use tower::ServiceExt;
 
 async fn issue_challenge(router: &axum::Router) -> RegistrationChallengeResponse {

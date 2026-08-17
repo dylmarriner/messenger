@@ -16,7 +16,11 @@ use serde::Serialize;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-async fn post_json<T: Serialize>(router: &axum::Router, uri: &str, value: &T) -> axum::response::Response {
+async fn post_json<T: Serialize>(
+    router: &axum::Router,
+    uri: &str,
+    value: &T,
+) -> axum::response::Response {
     router
         .clone()
         .oneshot(

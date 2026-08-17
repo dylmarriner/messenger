@@ -15,7 +15,11 @@ use serde::Serialize;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-async fn post_json<T: Serialize>(router: &axum::Router, uri: &str, value: &T) -> axum::response::Response {
+async fn post_json<T: Serialize>(
+    router: &axum::Router,
+    uri: &str,
+    value: &T,
+) -> axum::response::Response {
     router
         .clone()
         .oneshot(
@@ -133,12 +137,18 @@ async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
         .device_certificate
         .verify()
         .expect("root-signed device certificate");
-    assert_eq!(claimed.device_certificate.account_id, bob_contact.account_id);
+    assert_eq!(
+        claimed.device_certificate.account_id,
+        bob_contact.account_id
+    );
     assert_eq!(
         claimed.device_certificate.root_public_key,
         bob_contact.root_public_key
     );
-    assert_eq!(claimed.binding.device_id, claimed.device_certificate.device_id);
+    assert_eq!(
+        claimed.binding.device_id,
+        claimed.device_certificate.device_id
+    );
     claimed
         .binding
         .verify_for_contact(&bob_contact, &claimed_bytes)
@@ -159,9 +169,11 @@ async fn trusted_contact_authenticates_claimed_key_package_before_e2ee_relay() {
     let ciphertext = alice_mls
         .encrypt(&mut alice_group, plaintext)
         .expect("Alice encrypts locally");
-    assert!(!ciphertext
-        .windows(plaintext.len())
-        .any(|window| window == plaintext));
+    assert!(
+        !ciphertext
+            .windows(plaintext.len())
+            .any(|window| window == plaintext)
+    );
 
     let relay = InMemoryRelay::default();
     relay

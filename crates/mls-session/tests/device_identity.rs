@@ -26,7 +26,5 @@ fn validated_key_package_must_embed_the_expected_device_identity() {
     MlsClient::validate_key_package_for_device(&key_package, &expected_device_id)
         .expect("matching BasicCredential identity");
 
-    assert!(
-        MlsClient::validate_key_package_for_device(&key_package, &[0x44_u8; 16]).is_err()
-    );
+    assert!(MlsClient::validate_key_package_for_device(&key_package, &[0x44_u8; 16]).is_err());
 }

@@ -10,8 +10,7 @@ use thiserror::Error;
 
 const DEVICE_CREDENTIAL_ID_BYTES: usize = 16;
 const APPLICATION_PADDING_BYTES: usize = 256;
-const CIPHERSUITE: Ciphersuite =
-    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 /// Per-device MLS context.
 ///
@@ -138,8 +137,9 @@ impl MlsClient {
     ) -> Result<(), MlsError> {
         let provider = OpenMlsRustCrypto::default();
         let key_package = validate_key_package(&provider, serialized_key_package)?;
-        let basic_credential = BasicCredential::try_from(key_package.leaf_node().credential().clone())
-            .map_err(|_| MlsError::CredentialIdentityMismatch)?;
+        let basic_credential =
+            BasicCredential::try_from(key_package.leaf_node().credential().clone())
+                .map_err(|_| MlsError::CredentialIdentityMismatch)?;
 
         if basic_credential.identity() != expected_device_id {
             return Err(MlsError::CredentialIdentityMismatch);
@@ -198,13 +198,8 @@ impl MlsClient {
             _ => return Err(MlsError::WelcomeParsing),
         };
 
-        let staged = StagedWelcome::new_from_welcome(
-            &self.provider,
-            &join_config(),
-            welcome,
-            None,
-        )
-        .map_err(|_| MlsError::WelcomeJoin)?;
+        let staged = StagedWelcome::new_from_welcome(&self.provider, &join_config(), welcome, None)
+            .map_err(|_| MlsError::WelcomeJoin)?;
         let group = staged
             .into_group(&self.provider)
             .map_err(|_| MlsError::WelcomeJoin)?;

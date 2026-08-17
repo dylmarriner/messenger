@@ -18,7 +18,11 @@ use serde::Serialize;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-async fn post_json<T: Serialize>(router: &axum::Router, uri: &str, value: &T) -> axum::response::Response {
+async fn post_json<T: Serialize>(
+    router: &axum::Router,
+    uri: &str,
+    value: &T,
+) -> axum::response::Response {
     router
         .clone()
         .oneshot(
@@ -168,12 +172,18 @@ async fn anonymous_registration_to_authenticated_e2ee_delivery_round_trip() {
         .device_certificate
         .verify()
         .expect("device certificate signature");
-    assert_eq!(claimed.device_certificate.account_id, bob_contact.account_id);
+    assert_eq!(
+        claimed.device_certificate.account_id,
+        bob_contact.account_id
+    );
     assert_eq!(
         claimed.device_certificate.root_public_key,
         bob_contact.root_public_key
     );
-    assert_eq!(claimed.binding.device_id, claimed.device_certificate.device_id);
+    assert_eq!(
+        claimed.binding.device_id,
+        claimed.device_certificate.device_id
+    );
     claimed
         .binding
         .verify_for_contact(&bob_contact, &claimed_key_package)
@@ -186,18 +196,18 @@ async fn anonymous_registration_to_authenticated_e2ee_delivery_round_trip() {
     let welcome = alice_mls
         .add_member(&mut alice_group, &claimed_key_package)
         .expect("add authenticated Bob");
-    let mut bob_group = bob_mls
-        .join_from_welcome(&welcome)
-        .expect("Bob joins");
+    let mut bob_group = bob_mls.join_from_welcome(&welcome).expect("Bob joins");
 
     // Plaintext exists only at Alice and Bob. The HTTP relay receives MLS bytes.
     let plaintext = b"first complete anonymous E2EE vertical slice";
     let ciphertext = alice_mls
         .encrypt(&mut alice_group, plaintext)
         .expect("Alice encrypts");
-    assert!(!ciphertext
-        .windows(plaintext.len())
-        .any(|window| window == plaintext));
+    assert!(
+        !ciphertext
+            .windows(plaintext.len())
+            .any(|window| window == plaintext)
+    );
 
     let envelope_id = Uuid::new_v4();
     let submit = post_json(

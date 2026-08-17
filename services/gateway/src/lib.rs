@@ -5,10 +5,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::State,
-    http::{
-        HeaderMap, StatusCode,
-        header::AUTHORIZATION,
-    },
+    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -380,7 +377,11 @@ async fn submit_envelope(
 
     // Deliberately do not reveal whether a mailbox exists. An unknown or revoked
     // destination is accepted and dropped, preventing mailbox enumeration.
-    if state.devices.device_by_mailbox(&request.mailbox_id).is_none() {
+    if state
+        .devices
+        .device_by_mailbox(&request.mailbox_id)
+        .is_none()
+    {
         return Ok(StatusCode::ACCEPTED);
     }
 
@@ -446,9 +447,8 @@ fn authorize_bearer(state: &AppState, headers: &HeaderMap) -> Result<RegisteredD
     let decoded = URL_SAFE_NO_PAD
         .decode(encoded_token)
         .map_err(|_| ApiError::DeviceAuthFailed)?;
-    let token: [u8; SESSION_TOKEN_BYTES] = decoded
-        .try_into()
-        .map_err(|_| ApiError::DeviceAuthFailed)?;
+    let token: [u8; SESSION_TOKEN_BYTES] =
+        decoded.try_into().map_err(|_| ApiError::DeviceAuthFailed)?;
     state
         .devices
         .authorize_session(&token)

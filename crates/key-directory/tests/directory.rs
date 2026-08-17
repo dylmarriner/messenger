@@ -93,7 +93,9 @@ fn consumed_or_queued_key_package_cannot_be_uploaded_again() {
         Err(KeyDirectoryError::DuplicateKeyPackage)
     );
 
-    directory.claim(&account.account_id).expect("consume package");
+    directory
+        .claim(&account.account_id)
+        .expect("consume package");
     assert_eq!(
         directory.upload(&account, published),
         Err(KeyDirectoryError::DuplicateKeyPackage)

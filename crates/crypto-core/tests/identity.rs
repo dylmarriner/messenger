@@ -113,7 +113,9 @@ fn account_root_authorizes_distinct_device_and_mailbox_identities() {
     assert_ne!(first.mailbox_id(), second.mailbox_id());
 
     let certificate = account.authorize_device(&first);
-    certificate.verify().expect("root-signed device certificate");
+    certificate
+        .verify()
+        .expect("root-signed device certificate");
 
     assert_eq!(certificate.account_id, account.account_id());
     assert_eq!(certificate.device_id, first.device_id_encoded());
