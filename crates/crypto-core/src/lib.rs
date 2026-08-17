@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 const CONTACT_CARD_VERSION: u8 = 1;
 const ACCOUNT_ID_PREFIX: &str = "a1_";
@@ -53,10 +53,9 @@ impl AccountIdentity {
         let mut account_id_raw = [0_u8; ACCOUNT_ID_BYTES];
         getrandom::fill(&mut account_id_raw).map_err(|_| CryptoError::EntropyUnavailable)?;
 
-        let mut root_secret = [0_u8; ROOT_SECRET_BYTES];
-        getrandom::fill(&mut root_secret).map_err(|_| CryptoError::EntropyUnavailable)?;
-        let root_signing_key = SigningKey::from_bytes(&root_secret);
-        root_secret.zeroize();
+        let mut root_secret = Zeroizing::new([0_u8; ROOT_SECRET_BYTES]);
+        getrandom::fill(root_secret.as_mut()).map_err(|_| CryptoError::EntropyUnavailable)?;
+        let root_signing_key = SigningKey::from_bytes(root_secret.as_ref());
 
         let account_id = format!(
             "{ACCOUNT_ID_PREFIX}{}",
