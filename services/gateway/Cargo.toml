@@ -9,3 +9,6 @@ license.workspace = true
 axum.workspace = true
 serde.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
