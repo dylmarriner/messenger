@@ -1,4 +1,4 @@
-use messenger_crypto_core::{AccountIdentity, ContactCard};
+use messenger_crypto_core::{AccountIdentity, ContactCard, DeviceIdentity};
 
 #[test]
 fn generated_identities_are_distinct_and_cards_verify() {
@@ -99,6 +99,87 @@ fn key_package_binding_rejects_device_id_or_contact_substitution() {
     assert!(
         binding
             .verify_for_contact(&other_identity.contact_card(), key_package)
+            .is_err()
+    );
+}
+
+#[test]
+fn account_root_authorizes_distinct_device_and_mailbox_identities() {
+    let account = AccountIdentity::generate().expect("account");
+    let first = DeviceIdentity::generate().expect("first device");
+    let second = DeviceIdentity::generate().expect("second device");
+
+    assert_ne!(first.device_id(), second.device_id());
+    assert_ne!(first.mailbox_id(), second.mailbox_id());
+
+    let certificate = account.authorize_device(&first);
+    certificate.verify().expect("root-signed device certificate");
+
+    assert_eq!(certificate.account_id, account.account_id());
+    assert_eq!(certificate.device_id, first.device_id_encoded());
+    assert_eq!(certificate.mailbox_id, first.mailbox_id());
+}
+
+#[test]
+fn device_certificate_detects_routing_or_auth_key_tampering() {
+    let account = AccountIdentity::generate().expect("account");
+    let first = DeviceIdentity::generate().expect("first device");
+    let second = DeviceIdentity::generate().expect("second device");
+    let certificate = account.authorize_device(&first);
+    let second_certificate = account.authorize_device(&second);
+
+    let mut changed_mailbox = certificate.clone();
+    changed_mailbox.mailbox_id = second_certificate.mailbox_id.clone();
+    assert!(changed_mailbox.verify().is_err());
+
+    let mut changed_auth_key = certificate;
+    changed_auth_key.device_auth_public_key = second_certificate.device_auth_public_key;
+    assert!(changed_auth_key.verify().is_err());
+}
+
+#[test]
+fn device_authentication_proof_is_bound_to_certificate_and_challenge() {
+    let account = AccountIdentity::generate().expect("account");
+    let device = DeviceIdentity::generate().expect("device");
+    let certificate = account.authorize_device(&device);
+    let challenge_id = [0x88_u8; 16];
+    let challenge = [0x99_u8; 32];
+    let proof = device.authentication_proof(&challenge_id, &challenge);
+
+    proof
+        .verify(&certificate, &challenge_id, &challenge)
+        .expect("device-auth proof");
+
+    let mut changed_challenge = challenge;
+    changed_challenge[0] ^= 0x01;
+    assert!(
+        proof
+            .verify(&certificate, &challenge_id, &changed_challenge)
+            .is_err()
+    );
+
+    let mut changed_id = challenge_id;
+    changed_id[0] ^= 0x01;
+    assert!(proof.verify(&certificate, &changed_id, &challenge).is_err());
+}
+
+#[test]
+fn device_authentication_proof_cannot_be_reassigned_to_another_device() {
+    let account = AccountIdentity::generate().expect("account");
+    let first = DeviceIdentity::generate().expect("first device");
+    let second = DeviceIdentity::generate().expect("second device");
+    let first_certificate = account.authorize_device(&first);
+    let second_certificate = account.authorize_device(&second);
+    let challenge_id = [0xaa_u8; 16];
+    let challenge = [0xbb_u8; 32];
+    let proof = first.authentication_proof(&challenge_id, &challenge);
+
+    proof
+        .verify(&first_certificate, &challenge_id, &challenge)
+        .expect("first device proof");
+    assert!(
+        proof
+            .verify(&second_certificate, &challenge_id, &challenge)
             .is_err()
     );
 }
