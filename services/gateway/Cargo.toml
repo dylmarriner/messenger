@@ -9,11 +9,13 @@ license.workspace = true
 axum.workspace = true
 base64.workspace = true
 messenger-crypto-core = { path = "../../crates/crypto-core" }
+messenger-key-directory = { path = "../../crates/key-directory" }
 messenger-registration = { path = "../../crates/registration" }
 serde.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+messenger-mls-session = { path = "../../crates/mls-session" }
 serde_json.workspace = true
 tower.workspace = true
