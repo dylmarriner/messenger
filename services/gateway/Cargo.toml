@@ -17,5 +17,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 messenger-mls-session = { path = "../../crates/mls-session" }
+messenger-protocol = { path = "../../crates/protocol" }
+messenger-relay = { path = "../../crates/relay" }
 serde_json.workspace = true
 tower.workspace = true
