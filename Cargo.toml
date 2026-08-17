@@ -3,6 +3,7 @@ members = [
   "crates/protocol",
   "crates/crypto-core",
   "crates/mls-session",
+  "crates/registration",
   "crates/relay",
   "services/gateway",
 ]
