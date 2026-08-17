@@ -92,13 +92,13 @@ impl ContactCard {
         }
 
         let account_id_raw = decode_account_id(&self.account_id)?;
-        let root_public_key = decode_fixed::<ROOT_PUBLIC_KEY_BYTES>(
+        let root_public_key = decode_fixed::<ROOT_PUBLIC_KEY_BYTES, _>(
             &self.root_public_key,
-            CryptoError::InvalidPublicKey,
+            || CryptoError::InvalidPublicKey,
         )?;
-        let signature_bytes = decode_fixed::<SIGNATURE_BYTES>(
+        let signature_bytes = decode_fixed::<SIGNATURE_BYTES, _>(
             &self.signature,
-            CryptoError::InvalidSignature,
+            || CryptoError::InvalidSignature,
         )?;
 
         let verifying_key = VerifyingKey::from_bytes(&root_public_key)
@@ -117,12 +117,15 @@ fn decode_account_id(value: &str) -> Result<[u8; ACCOUNT_ID_BYTES], CryptoError>
         .strip_prefix(ACCOUNT_ID_PREFIX)
         .ok_or(CryptoError::InvalidAccountId)?;
 
-    decode_fixed::<ACCOUNT_ID_BYTES>(encoded, CryptoError::InvalidAccountId)
+    decode_fixed::<ACCOUNT_ID_BYTES, _>(encoded, || CryptoError::InvalidAccountId)
 }
 
-fn decode_fixed<const N: usize>(value: &str, error: CryptoError) -> Result<[u8; N], CryptoError> {
-    let decoded = URL_SAFE_NO_PAD.decode(value).map_err(|_| error)?;
-    decoded.try_into().map_err(|_| error)
+fn decode_fixed<const N: usize, F>(value: &str, error: F) -> Result<[u8; N], CryptoError>
+where
+    F: Fn() -> CryptoError,
+{
+    let decoded = URL_SAFE_NO_PAD.decode(value).map_err(|_| error())?;
+    decoded.try_into().map_err(|_| error())
 }
 
 fn contact_card_payload(
