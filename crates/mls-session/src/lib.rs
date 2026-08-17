@@ -152,9 +152,7 @@ impl MlsClient {
             .merge_pending_commit(&self.provider)
             .map_err(|_| MlsError::PendingCommitMerge)?;
 
-        welcome
-            .tls_serialize_detached()
-            .map_err(|_| MlsError::Serialization)
+        welcome.to_bytes().map_err(|_| MlsError::Serialization)
     }
 
     pub fn join_from_welcome(&self, serialized_welcome: &[u8]) -> Result<MlsGroupState, MlsError> {
@@ -187,7 +185,7 @@ impl MlsClient {
             .group
             .create_message(&self.provider, &self.signer, plaintext)
             .map_err(|_| MlsError::MessageEncryption)?
-            .tls_serialize_detached()
+            .to_bytes()
             .map_err(|_| MlsError::Serialization)
     }
 
