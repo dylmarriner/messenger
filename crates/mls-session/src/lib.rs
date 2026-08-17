@@ -1,11 +1,9 @@
 #![forbid(unsafe_code)]
 
-use openmls::{
-    prelude::{tls_codec::*, *},
-    storage::OpenMlsProvider,
-};
+use openmls::prelude::{tls_codec::*, *};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
+use openmls_traits::OpenMlsProvider;
 use thiserror::Error;
 
 const DEVICE_CREDENTIAL_ID_BYTES: usize = 16;
@@ -183,9 +181,10 @@ impl MlsClient {
     pub fn join_from_welcome(&self, serialized_welcome: &[u8]) -> Result<MlsGroupState, MlsError> {
         let message = MlsMessageIn::tls_deserialize_exact(serialized_welcome)
             .map_err(|_| MlsError::WelcomeParsing)?;
-        let welcome = message
-            .into_welcome()
-            .map_err(|_| MlsError::WelcomeParsing)?;
+        let welcome = match message.extract() {
+            MlsMessageBodyIn::Welcome(welcome) => welcome,
+            _ => return Err(MlsError::WelcomeParsing),
+        };
 
         let staged = StagedWelcome::new_from_welcome(
             &self.provider,
