@@ -43,6 +43,42 @@ impl InMemoryRelay {
         Ok(())
     }
 
+    /// Returns a stable snapshot without changing delivery state. The caller
+    /// must explicitly acknowledge delivered envelope IDs before deletion.
+    pub fn retrieve_mailbox(&self, mailbox_id: &str) -> Vec<Envelope> {
+        self.state()
+            .mailboxes
+            .get(mailbox_id)
+            .map(|queue| queue.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Removes only the named envelopes from the named mailbox and returns the
+    /// number of records deleted. Envelope IDs remain in the replay set.
+    pub fn acknowledge(&self, mailbox_id: &str, envelope_ids: &[Uuid]) -> usize {
+        if envelope_ids.is_empty() {
+            return 0;
+        }
+
+        let requested: HashSet<Uuid> = envelope_ids.iter().copied().collect();
+        let mut state = self.state();
+        let (removed, remove_mailbox) = {
+            let Some(queue) = state.mailboxes.get_mut(mailbox_id) else {
+                return 0;
+            };
+            let before = queue.len();
+            queue.retain(|envelope| !requested.contains(&envelope.envelope_id));
+            (before - queue.len(), queue.is_empty())
+        };
+
+        if remove_mailbox {
+            state.mailboxes.remove(mailbox_id);
+        }
+        removed
+    }
+
+    /// Backward-compatibility helper for early integration tests. HTTP delivery
+    /// must use `retrieve_mailbox` plus explicit `acknowledge` instead.
     pub fn drain_mailbox(&self, mailbox_id: &str) -> Vec<Envelope> {
         self.state()
             .mailboxes
